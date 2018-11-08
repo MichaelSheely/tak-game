@@ -47,14 +47,10 @@ class PlayerIO(object):
                    sep='[ ,]?', digits='(\d+)',
                    direction='([u|d|l|r])', drop_list='([\d+ ,]*)')
     move_match = re.match(pattern, user_input)
-    # 'm ?,?(\d+) ?,?(\d+) ?,?([u|d|l|r]) ?,?(\d+) ?,?([\d+ ,]*)'
     if move_match is not None:
       self.action = 'move'
       self.position = int(move_match.group(1)), int(move_match.group(2))
-      print(self.position)
       self.direction = move_match.group(3)
-      print(self.direction)
-      # TODO(fix this)
       self.drop_list = move_match.group(4).replace(',',' ').split(' ')
       # If the user did not enter a drop list, we use the default drop list
       # of [1] (meaning move the top piece just one in the direction indicated
@@ -62,7 +58,6 @@ class PlayerIO(object):
         self.drop_list = [1]
       self.drop_list[:] = [int(i) for i in self.drop_list]
       self.spaces_to_move = len(self.drop_list)
-      print('Drop list is {}'.format(self.drop_list))
       return 
     place_match = re.match('p[ ,]?([r|w|c])[ ,]?(\d+)[ ,]?(\d+)', user_input)
     if place_match is not None:
@@ -109,11 +104,28 @@ class PlayerIO(object):
     # we also make sure the player doesn't try to skip over any cells
     if any(map(lambda x: x == 0, self.drop_list)):
       self.errors.append(('Tried to skip over a tile without dropping any '
-                          'pieces, which is not legal drop_list was {}').format(
+                          'pieces, which is not legal; drop_list: {}').format(
                               self.drop_list))
       return False
-    # TODO ensure we don't try to move / drop pieces onto any walls or capstones
-    # (unless we ourselves are a capstone moving to crush a wall)
+    # ensure we don't try to move / drop pieces onto any walls or capstones
+    for i, drop in enumerate(self.drop_list):
+      new_position = Strafe(self.position, i + 1, self.direction)
+      if not self.board[new_position].CanBeCapped():
+        # can never move onto a capstone
+        if self.board[new_position].Peek().type == capstone:
+          self.errors.append('Attempted to drop a piece onto a capstone ' +
+                  'at position {}, but capstones cannot be capped'.format(
+                      new_position))
+          return False
+        # in this case we are moving onto a wall, the only way this is ok
+        # is if we ourselves are a capstone moving to crush the wall
+        idx_in_stack = sum(self.drop_list[:i])
+        piece_dropped = self.board[self.position].Peek(idx_in_stack)
+        if not piece_dropped.type == capstone:
+          self.errors.append(('Attempted to drop {} (originally from stack ' +
+              'at {} onto a wall at position {}, but only capstones can ' +
+              'crush walls').format(piece_dropped, self.position, new_position))
+          return False
     return True
   def IsValidInput(self):
     self.errors = []
@@ -148,9 +160,12 @@ class PlayerIO(object):
     self.game_state = game_state
     # if the list of drops is ommited, a default of [1] is used
     # (i.e. move just the top piece)
-    self.ParseInput(raw_input(
-        'Place piece \'p [r|w|c] x y\' or ' +
-        'move \'m x y u|d|l|r [num_to_drop...]\'? '))
+    prompt = ('Place piece \'p [r|w|c] x y\' or ' +
+              'move \'m x y u|d|l|r [num_to_drop...]\'? ')
+    try:
+        self.ParseInput(raw_input(prompt))
+    except NameError:
+        self.ParseInput(input(prompt))
     if self.IsValidInput():
       return self.GetValidResponse()
     else:
@@ -184,17 +199,22 @@ class Tile(object):
     if len(self.stack) == 0:
       return None
     return self.stack[-1].color
-
+  def CanBeCapped(self):
+    if len(self.stack) == 0 or self.stack[-1].type = road:
+      return True
+    else:
+      # capstones and walls cannot be capped
+      return False
   def Push(self, pawn):
     self.stack.append(pawn)
   def Pop(self):
     return self.stack.pop()
   def Size(self):
     return len(self.stack)
-  # def GetTop(self):
-  #   if len(self.stack) == 0:
-  #     return None
-  #   return self.stack[-1]
+  def Peek(self, i=0):
+    if len(self.stack) <= i:
+      return None
+    return self.stack[-1 - i]
   def __repr__(self):
     stack = []
     for piece in self.stack:
